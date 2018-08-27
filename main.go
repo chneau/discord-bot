@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -10,7 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonas747/dca"
+
+	"github.com/rylio/ytdl"
+
 	"github.com/chneau/anecdote/pkg/anecdote"
+	"github.com/chneau/tt"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -49,9 +55,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+	defer tt.T()()
 	log.Println(m.Author.Username, m.Content)
 	if strings.HasPrefix(m.Content, ".") {
-		defer s.ChannelMessageDelete(m.ChannelID, m.ID)
+		s.ChannelMessageDelete(m.ChannelID, m.ID)
 	} else {
 		return
 	}
@@ -108,6 +115,56 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		if err := s.ChannelMessagesBulkDelete(m.ChannelID, messagesID); err != nil {
 			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
+		}
+	case ".yt":
+		if len(strTok) < 2 {
+			break
+		}
+		c, err := s.State.Channel(m.ChannelID)
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
+			break
+		}
+		g, err := s.State.Guild(c.GuildID)
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
+			break
+		}
+		vs := g.VoiceStates[0]
+		vc, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
+
+		// Change these accordingly
+		options := dca.StdEncodeOptions
+		options.RawOutput = true
+		options.Bitrate = 96
+		options.Application = "lowdelay"
+
+		videoInfo, err := ytdl.GetVideoInfo(strTok[1])
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
+			break
+		}
+
+		format := videoInfo.Formats.Extremes(ytdl.FormatAudioBitrateKey, true)[0]
+		downloadURL, err := videoInfo.GetDownloadURL(format)
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
+			break
+		}
+
+		encodingSession, err := dca.EncodeFile(downloadURL.String(), options)
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
+			break
+		}
+		defer encodingSession.Cleanup()
+
+		done := make(chan error)
+		dca.NewStream(encodingSession, vc, done)
+		err = <-done
+		if err != nil && err != io.EOF {
+			s.ChannelMessageSend(m.ChannelID, "Error: err = <-done"+err.Error())
+			break
 		}
 	}
 }
