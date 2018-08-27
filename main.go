@@ -46,10 +46,10 @@ func main() {
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	log.Println(m.Author.Username, m.Content)
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+	log.Println(m.Author.Username, m.Content)
 	if strings.HasPrefix(m.Content, ".") {
 		defer s.ChannelMessageDelete(m.ChannelID, m.ID)
 	} else {
