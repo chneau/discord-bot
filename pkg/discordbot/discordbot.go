@@ -17,6 +17,7 @@ type DiscordBot struct {
 
 // Close ...
 func (d *DiscordBot) Close() error {
+	println("Bye bye !")
 	return d.Session.Close()
 }
 
