@@ -1,10 +1,7 @@
 package discordbot
 
 import (
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/chneau/discord-bot/pkg/command"
 
@@ -54,22 +51,12 @@ func (d *DiscordBot) messageCreate(s *discordgo.Session, m *discordgo.MessageCre
 	}
 }
 
-func (d *DiscordBot) signalHandler() {
-	go func() {
-		sc := make(chan os.Signal, 1)
-		signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-		<-sc
-		d.Close()
-	}()
-}
-
 // Add ...
 func (d *DiscordBot) Add(cmd command.Commander) {
 	d.Commands[cmd.Name()] = cmd
 }
 
 func (d *DiscordBot) init() {
-	d.signalHandler()
 	d.Session.AddHandler(d.messageCreate)
 	if err := d.Session.Open(); err != nil {
 		panic(err)

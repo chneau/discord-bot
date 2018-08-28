@@ -22,7 +22,8 @@ func ce(err error, msg string) {
 }
 
 func main() {
-	discordbot.NewDefault(os.Getenv("DISCORD_BOT_TOKEN"))
+	d := discordbot.NewDefault(os.Getenv("DISCORD_BOT_TOKEN"))
+	defer d.Close()
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
