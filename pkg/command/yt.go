@@ -12,7 +12,10 @@ import (
 )
 
 // YT ...
-type YT struct{}
+type YT struct {
+	playing chan interface{}
+	stop    chan interface{}
+}
 
 // Name ...
 func (y *YT) Name() string {
@@ -21,15 +24,32 @@ func (y *YT) Name() string {
 
 // Description ...
 func (y *YT) Description() string {
-	return "> echo a yt video to first voice channel"
+	return "> play a yt video to first voice channel"
+}
+
+func (y *YT) linkFronChat(content string) string {
+	strTok := strings.SplitN(content, " ", 2)
+	ytlink := "JqRxmy1h5as"
+	if len(strTok) == 2 {
+		ytlink = strTok[1]
+	}
+	return ytlink
+}
+
+func (y *YT) dcaDefaultOpt() *dca.EncodeOptions {
+	options := dca.StdEncodeOptions
+	options.RawOutput = true
+	options.Bitrate = 96
+	options.Application = dca.AudioApplicationLowDelay
+	return options
 }
 
 // MessageCreate ...
 func (y *YT) MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) error {
-	strTok := strings.SplitN(m.Content, " ", 2)
-	if len(strTok) < 2 {
-		return errors.New("Not enough arguments to command")
+	if len(y.playing) == 0 {
+		y.stop <- nil
 	}
+	ytlink := y.linkFronChat(m.Content)
 	c, err := s.State.Channel(m.ChannelID)
 	if err != nil {
 		return err
@@ -38,50 +58,61 @@ func (y *YT) MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) err
 	if err != nil {
 		return err
 	}
-	vs := g.VoiceStates[0]
-	vc, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
-	// Change these accordingly
-	options := dca.StdEncodeOptions
-	options.RawOutput = true
-	options.Bitrate = 96
-	options.Application = "lowdelay"
-
-	videoInfo, err := ytdl.GetVideoInfo(strTok[1])
+	videoInfo, err := ytdl.GetVideoInfo(ytlink)
 	if err != nil {
 		return err
 	}
-
-	format := videoInfo.Formats.Extremes(ytdl.FormatAudioBitrateKey, true)[0]
-	downloadURL, err := videoInfo.GetDownloadURL(format)
+	if videoInfo.Duration == 0 {
+		return errors.New("video not found")
+	}
+	vc, err := s.ChannelVoiceJoin(g.ID, g.VoiceStates[0].ChannelID, false, true)
 	if err != nil {
 		return err
 	}
-
-	encodingSession, err := dca.EncodeFile(downloadURL.String(), options)
+	downloadURL, err := videoInfo.GetDownloadURL(videoInfo.Formats.Extremes(ytdl.FormatAudioBitrateKey, true)[0])
+	if err != nil {
+		return err
+	}
+	encodingSession, err := dca.EncodeFile(downloadURL.String(), y.dcaDefaultOpt())
 	if err != nil {
 		return err
 	}
 	defer encodingSession.Cleanup()
-	vc.Speaking(true)
+	message, _ := s.ChannelMessageSend(m.ChannelID, "Playing: "+videoInfo.Title)
+	defer func() {
+		s.ChannelMessageDelete(m.ChannelID, message.ID)
+	}()
+	err = y.play(encodingSession, vc.OpusSend)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (y *YT) play(e *dca.EncodeSession, opusSend chan []byte) error {
+	<-y.playing
+	defer func() {
+		y.playing <- nil
+	}()
 	for {
-		opus, err := encodingSession.OpusFrame()
-		if err == io.EOF {
-			break
-		}
+		opus, err := e.OpusFrame()
 		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
 			return err
 		}
-		vc.OpusSend <- opus
+		select {
+		case opusSend <- opus:
+		case <-y.stop:
+			return nil
+		}
 	}
-	vc.Speaking(false)
-	vc.Disconnect()
+}
 
-	// done := make(chan error)
-	// y.ss = dca.NewStream(encodingSession, vc, done)
-	// y.ss.Unlock
-	// err = <-done
-	// if err != nil && err != io.EOF {
-	// 	return err
-	// }
-	return nil
+// Init ...
+func (y *YT) Init() {
+	y.playing = make(chan interface{}, 1)
+	y.stop = make(chan interface{})
+	y.playing <- nil
 }

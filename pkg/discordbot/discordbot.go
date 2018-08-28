@@ -41,7 +41,7 @@ func (d *DiscordBot) messageCreate(s *discordgo.Session, m *discordgo.MessageCre
 		return
 	}
 	cmd := strings.SplitN(m.Content, " ", 2)[0]
-	cmd = cmd[1:]
+	cmd = cmd[len(d.Prefix):]
 	if val, ok := d.Commands[cmd]; ok {
 		if err := val.MessageCreate(s, m); err != nil {
 			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
@@ -93,7 +93,9 @@ func NewDefault(token string) *DiscordBot {
 	d.Add(&command.SCMB{})
 	d.Add(&command.SI{})
 	d.Add(&command.Clear{})
-	d.Add(&command.YT{})
+	yt := &command.YT{}
+	yt.Init()
+	d.Add(yt)
 	println("Bot is now running.  Press CTRL-C to exit.")
 	return d
 }
