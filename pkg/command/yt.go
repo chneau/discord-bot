@@ -24,7 +24,7 @@ func (y *YT) Name() string {
 
 // Description ...
 func (y *YT) Description() string {
-	return "> play a yt video to first voice channel"
+	return "__link-or-ID__ > play a yt video to first voice channel"
 }
 
 func (y *YT) linkFronChat(content string) string {
