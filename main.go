@@ -1,24 +1,12 @@
 package main
 
 import (
-	"crypto/md5"
-	"encoding/hex"
-	"io"
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 
-	"github.com/jonas747/dca"
-
-	"github.com/rylio/ytdl"
-
-	"github.com/chneau/anecdote/pkg/anecdote"
-	"github.com/chneau/tt"
-
-	"github.com/bwmarrin/discordgo"
+	"github.com/chneau/discord-bot/pkg/discordbot"
 )
 
 func init() {
@@ -34,144 +22,9 @@ func ce(err error, msg string) {
 }
 
 func main() {
-	token := os.Getenv("DISCORD_BOT_TOKEN")
-	if token == "" {
-		panic("No DISCORD_BOT_TOKEN env.")
-	}
-	discord, err := discordgo.New("Bot " + token)
-	ce(err, "discordgo.New")
-	defer discord.Close()
-	discord.AddHandler(messageCreate)
-	err = discord.Open()
-	ce(err, "discord.Open")
-	println("Bot is now running.  Press CTRL-C to exit.")
+	discordbot.NewDefault(os.Getenv("DISCORD_BOT_TOKEN"))
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
 	println()
-}
-
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.Author.ID == s.State.User.ID {
-		return
-	}
-	defer tt.T()()
-	log.Println(m.Author.Username, m.Content)
-	if strings.HasPrefix(m.Content, ".") {
-		s.ChannelMessageDelete(m.ChannelID, m.ID)
-	} else {
-		return
-	}
-	strTok := strings.SplitN(m.Content, " ", 2)
-	switch strTok[0] {
-	case ".help":
-		s.ChannelMessageSend(m.ChannelID, help)
-	case ".md5":
-		if len(strTok) > 1 {
-			s.ChannelMessageSend(m.ChannelID, MD5Hash(strTok[1]))
-		}
-	case ".ping":
-		date, err := m.Timestamp.Parse()
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		now := time.Now()
-		s.ChannelMessageSend(m.ChannelID, "pong "+now.Sub(date).String())
-	case ".annecdote":
-		fallthrough
-	case ".scmb":
-		anecdotes, err := anecdote.SCMB()
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		s.ChannelMessageSend(m.ChannelID, anecdotes[0].String())
-	case ".si":
-		anecdotes, err := anecdote.SI()
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		s.ChannelMessageSend(m.ChannelID, anecdotes[0].String())
-	case ".rmrf":
-		// TODO check that user is either Owner or have the rights to delete messages !
-		messages, err := s.ChannelMessages(m.ChannelID, 100, "", "", "")
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		messagesID := []string{}
-		fourteenDaysAgo := time.Now()
-		fourteenDaysAgo = fourteenDaysAgo.Add(-time.Hour * 24 * 14)
-		for i := range messages {
-			m := messages[i]
-			t, _ := m.Timestamp.Parse()
-			if t.After(fourteenDaysAgo) {
-				messagesID = append(messagesID, m.ID)
-			} else {
-				s.ChannelMessageDelete(m.ChannelID, m.ID)
-			}
-		}
-		if err := s.ChannelMessagesBulkDelete(m.ChannelID, messagesID); err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-		}
-	case ".yt":
-		if len(strTok) < 2 {
-			break
-		}
-		c, err := s.State.Channel(m.ChannelID)
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		g, err := s.State.Guild(c.GuildID)
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		vs := g.VoiceStates[0]
-		vc, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
-
-		// Change these accordingly
-		options := dca.StdEncodeOptions
-		options.RawOutput = true
-		options.Bitrate = 96
-		options.Application = "lowdelay"
-
-		videoInfo, err := ytdl.GetVideoInfo(strTok[1])
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-
-		format := videoInfo.Formats.Extremes(ytdl.FormatAudioBitrateKey, true)[0]
-		downloadURL, err := videoInfo.GetDownloadURL(format)
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-
-		encodingSession, err := dca.EncodeFile(downloadURL.String(), options)
-		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Error: "+err.Error())
-			break
-		}
-		defer encodingSession.Cleanup()
-
-		done := make(chan error)
-		dca.NewStream(encodingSession, vc, done)
-		err = <-done
-		if err != nil && err != io.EOF {
-			s.ChannelMessageSend(m.ChannelID, "Error: err = <-done"+err.Error())
-			break
-		}
-	}
-}
-
-// MD5Hash ...
-func MD5Hash(text string) string {
-	hasher := md5.New()
-	hasher.Write([]byte(text)) // Recast the string to a byte array
-	return hex.EncodeToString(hasher.Sum(nil))
 }
